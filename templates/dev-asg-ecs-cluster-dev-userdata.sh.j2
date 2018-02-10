@@ -1,0 +1,109 @@
+#!/bin/bash
+MYAZ=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone)
+MYIPV4=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
+hostnamectl set-hostname "ecs-cluster-dev-{{ app_name }}-{{ dev_env }}-'${MYAZ: -1}-'`echo $MYIPV4 | sed 's/\./-/g'`.{{ dev_env }}.dev.com"
+
+# Set iptables rules
+echo 'net.ipv4.conf.all.route_localnet = 1' >> /etc/sysctl.conf
+sysctl -p /etc/sysctl.conf
+iptables -t nat -A PREROUTING -p tcp -d 169.254.170.2 --dport 80 -j DNAT --to-destination 127.0.0.1:51679
+iptables -t nat -A OUTPUT -d 169.254.170.2 -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 51679
+
+# Write iptables rules to persist after reboot
+iptables-save > /etc/sysconfig/iptables
+
+# Create directories for ECS agent
+mkdir -p /var/log/ecs /var/lib/ecs/data /etc/ecs
+
+# Write ECS config file
+cat << EOF > /etc/ecs/ecs.config
+ECS_DATADIR=/data
+ECS_ENABLE_TASK_IAM_ROLE=true
+ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true
+ECS_LOGFILE=/log/ecs-agent.log
+ECS_AVAILABLE_LOGGING_DRIVERS=["json-file","awslogs"]
+ECS_LOGLEVEL=warn
+ECS_CHECKPOINT=true
+ECS_CLUSTER=ecs-cluster-dev-{{ app_name }}-{{dev_env}}
+EOF
+
+# Configure DeviceMapper
+systemctl stop docker
+cat << EOF > /etc/docker/daemon.json
+{
+  "storage-driver": "devicemapper",
+  "storage-opts": [
+    "dm.directlvm_device=/dev/xvdcz",
+    "dm.thinp_percent=95",
+    "dm.thinp_metapercent=1",
+    "dm.thinp_autoextend_threshold=80",
+    "dm.thinp_autoextend_percent=20",
+    "dm.directlvm_device_force=false"
+  ]
+}
+EOF
+
+# Write systemd unit file
+cat << EOF > /etc/systemd/system/docker-container@ecs-agent.service
+[Unit]
+Description=Docker Container %I
+Requires=docker.service
+After=docker.service
+
+[Service]
+Restart=always
+ExecStart=/usr/bin/docker run --name %i \
+--privileged \
+--restart=on-failure:10 \
+--volume=/var/run:/var/run \
+--volume=/var/log/ecs/:/log:Z \
+--volume=/var/lib/ecs/data:/data:Z \
+--volume=/etc/ecs:/etc/ecs \
+--net=host \
+--env-file=/etc/ecs/ecs.config \
+amazon/amazon-ecs-agent:latest
+ExecStop=/usr/bin/docker rm -f %i
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Write docker-dd-agent systemd unit file
+cat << EOF > /etc/systemd/system/docker-container@dd-agent.service
+[Unit]
+Description=Docker Container %I
+Requires=docker.service
+After=docker-container@ecs-agent.service
+
+[Service]
+Restart=always
+Environment=API_KEY=XXXXXX
+Environment=TAGS=simple-tag-0
+ExecStart=/usr/bin/docker run --name %i \
+--volume=/etc/dd-agent/datadog.conf:/etc/dd-agent/datadog.conf \
+  --volume=/var/run/docker.sock:/var/run/docker.sock \
+  --volume=/proc/:/host/proc/:ro \
+  --volume=/sys/fs/cgroup/:/host/sys/fs/cgroup:ro \
+  datadog/docker-dd-agent:latest
+ExecStop=/usr/bin/docker rm -f %i
+
+[Install]
+WantedBy=default.target
+EOF
+
+
+# Start docker
+systemctl enable docker
+systemctl start docker
+
+# Start ECS Agent Docker instance
+systemctl enable docker-container@ecs-agent.service
+systemctl start docker-container@ecs-agent.service
+
+# Start the dd-agent Docker instance
+systemctl enable docker-container@dd-agent.service
+systemctl start docker-container@dd-agent.service
+
+# Start Datadog
+systemctl enable datadog-agent.service
+systemctl restart datadog-agent.service
