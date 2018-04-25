@@ -1,0 +1,2 @@
+---
+conf: 'default-nginx.conf.j2'

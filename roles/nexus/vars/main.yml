@@ -1,0 +1,7 @@
+---
+s3_bucket: 'dev-bucket'
+s3_object_jdk: 'jdk-8u161-linux-x64.rpm'
+jdk_dest_filename: 'jdk-8u161-linux-x64.rpm'
+s3_object_nexus: 'nexus-3.9.0-01-unix.tar.gz'
+nexus_dest_filename: 'nexus-3.9.0-01-unix.tar.gz'
+nexus_ver_dir: 'nexus-3.9.0-01'

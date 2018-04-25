@@ -1,0 +1,105 @@
+---
+
+- group:
+    name: nexus
+
+- user:
+    name: nexus
+    group: nexus
+
+- file:
+    dest: /opt
+    owner: root
+    group: root
+    mode: 0775
+    state: directory
+
+
+- name: Download java rpm locally
+  local_action:
+    module: aws_s3
+    bucket: '{{ s3_bucket }}'
+    object: '{{ s3_object_jdk }}'
+    dest: '/tmp/{{ jdk_dest_filename }}'
+    mode: get
+  sudo: False
+
+- name: Copy java rpm to client
+  copy:
+    src: /tmp/{{ jdk_dest_filename }}
+    dest: /var/tmp/{{ jdk_dest_filename }}
+
+- name: Install java rpm
+  yum:
+    name: /var/tmp/{{ jdk_dest_filename }}
+    state: present
+
+- name: Download nexus tar locally
+  local_action:
+    module: aws_s3
+    bucket: '{{ s3_bucket }}'
+    object: '{{ s3_object_nexus }}'
+    dest: '/tmp/{{ nexus_dest_filename }}'
+    mode: get
+  sudo: False
+
+- name: Copy nexus tar client
+  copy:
+    src: /tmp/{{ nexus_dest_filename }}
+    dest: /var/tmp/{{ nexus_dest_filename }}
+
+- name: Untar nexus tar 
+  unarchive:
+    src: /var/tmp/{{ nexus_dest_filename }}
+    dest: /opt
+    remote_src: True
+    owner: nexus
+    group: nexus
+    creates: /opt/{{ nexus_ver_dir }}
+
+- name: fix Perm on Nexus dir
+  command: chown -R nexus:nexus /opt/{{nexus_ver_dir}} /opt/sonatype-work
+
+- name: Create symlimk for /opt/nexus
+  file: 
+    src: /opt/{{ nexus_ver_dir }}
+    dest: /opt/nexus
+    state: link
+    force: yes
+
+- name: Copy nexus bashrc
+  copy:
+    src: bashrc
+    dest: /home/nexus/.bashrc
+    owner: nexus
+    group: nexus
+    mode: 0755
+
+- name: Copy nexus rc
+  copy:
+    src: nexus.rc
+    dest: /opt/nexus/bin/nexus.rc
+    owner: nexus
+    group: nexus
+    force: yes
+    mode: 0755
+
+- name: Copy Nexus service
+  copy:
+    src: nexus.service
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Create Nexus Systemd
+  systemd:
+    name: nexus.service
+    enabled: yes
+    daemon_reload: yes
+
+# - name: Enable Systemd Script for Nexus
+#   service:
+#     name: nexus
+#     enabled: yes
+#     state: started

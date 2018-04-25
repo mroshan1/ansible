@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  description: Role to Setup hostname based on ec2 Name tag
+
+dependencies: []

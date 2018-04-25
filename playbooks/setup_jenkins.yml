@@ -1,0 +1,8 @@
+---
+- hosts: all
+  become: yes
+
+  roles:
+    - jenkins
+    - { role: nginx, conf: 'jenkins-nexus-revproxy.conf.j2' }
+    - { role: nexus }

@@ -1,0 +1,4 @@
+---
+- hosts: localhost
+  roles:
+    - { role: jenkins, conf: 'jenkins-nexus-revproxy.conf.j2'
